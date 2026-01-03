@@ -1,106 +1,147 @@
 
-📚 PubMed Daily DeepReader (自动化医学文献日报)
-这是一个基于 GitHub Actions 和 Python 的自动化文献追踪工具。它每天自动抓取指定的 PubMed RSS 订阅源，利用自然语言处理技术提取文章结构（背景、方法、结果、结论），调用翻译接口生成中文摘要，并构建一个现代化的交互式网页供科研人员快速阅读。
+---
 
-无需服务器，零成本，全自动运行。
+# 🧬 PubMed Daily DeepReader
 
-✨ 核心功能
-多源订阅：通过 feeds.txt 轻松管理多个 PubMed RSS 链接。
+> **零成本、全自动的医学文献情报站**
+> 🚀 **核心优势**：利用 PubMed API 抓取完整的结构化摘要（背景/方法/结果/结论），告别 RSS 的“残缺”信息，提供精准的中英对照阅读体验。
 
-智能结构化：自动识别并分离摘要中的 Background, Methods, Results, Conclusion，解决长文本阅读困难。
+## 📖 简介 (Introduction)
 
-中英对照：左侧文章列表，右侧详情页。支持点击展开英文原文，关键术语和标题自动加粗。
+**PubMed Daily DeepReader** 是一个为医学科研人员打造的自动化文献追踪工具。
 
-全自动更新：
+传统的 RSS 订阅往往只提供被截断的纯文本摘要，阅读体验极差。本项目通过 **Biopython** 直接调用 **PubMed Entrez API**，下载论文的原始 XML 数据，精准提取并分离 `Background`、`Methods`、`Results`、`Conclusion` 等段落，结合机器翻译生成排版精美的中文日报。
 
-📅 每日定时：北京时间每天早上 8:00 自动抓取更新。
+整个系统运行在 **GitHub Actions** 上，无需服务器，完全免费。
 
-🚀 即时触发：修改订阅列表 (feeds.txt) 后立即自动重新生成。
+---
 
-历史存档：自动保存每日生成的 HTML 文件，方便回溯。
+## ✨ 核心功能 (Key Features)
 
-现代化 UI：基于 Tailwind CSS 和 Alpine.js 构建，支持关键词高亮、作者显示及源链接跳转。
+* **🔍 API 深度抓取**：不仅仅是 RSS 搬运工。系统利用 PMID 调用 API 获取官方结构化数据，确保摘要完整、分段清晰。
+* **🇨🇳 智能中英对照**：
+* 左侧目录快速筛选，右侧详情深度阅读。
+* **结构化翻译**：自动识别段落标签（如 **RESULTS**），强制加粗换行，避免翻译引擎混淆结构。
+* **关键词提取**：自动获取并翻译 MeSH 关键词。
 
-📖 使用指南
-1. 如何查看日报？
-访问项目的 GitHub Pages 链接（在仓库 Settings -> Pages 中查看）：
 
-https://[你的用户名].github.io/[仓库名称]/
+* **📂 便捷订阅管理**：无需修改代码，只需编辑 `feeds.txt` 文本文件即可增删订阅源。
+* **⚡ 全自动运行**：
+* 📅 每天北京时间 **08:00** 定时抓取。
+* 🔄 修改订阅列表后 **立即触发** 更新。
 
-2. 如何添加/修改订阅？
-不需要懂代码，只需修改文本文件：
 
-在仓库中找到 feeds.txt 文件。
+* **📱 现代化阅读界面**：基于 Tailwind CSS 打造，适配手机与桌面端，提供类原生 App 的阅读体验。
 
-点击右上角的 ✏️ (编辑) 图标。
+---
 
-粘贴你的 PubMed RSS 链接（一行一个）。
+## 🚀 快速开始 (Getting Started)
 
-如何获取链接：在 PubMed 搜索关键词 -> 点击 "Create RSS" -> 设置数量 -> 复制橘黄色 XML 链接。
+### 1. 如何阅读日报？
 
-点击 Commit changes 保存。
+直接访问本仓库的 GitHub Pages 页面：
 
-等待 1-2 分钟，GitHub Actions 会自动运行并更新网页。
+> **[点击这里查看生成的日报网页]**
+> *(请在你的仓库 Settings -> Pages 中获取具体链接，通常是 `https://你的用户名.github.io/仓库名/`)*
 
-⚙️ 部署教程 (如果你想自己搭建)
-如果你是 Fork 本项目或是重新搭建，请确保完成以下设置：
+### 2. 如何管理订阅？
 
-1. 环境准备
-无需本地安装 Python，所有依赖由 GitHub Actions 云端环境自动安装（详见 .github/workflows/daily_run.yml）。
+你不需要懂编程，只需要像写记事本一样操作：
 
-2. 开启 GitHub Pages
-为了让生成的 HTML 能被访问：
+1. 在仓库中打开 **`feeds.txt`** 文件。
+2. 点击右上角的 **✏️ (Edit)** 按钮。
+3. 粘贴你的 PubMed RSS 链接（一行一个）。
+* *提示：在 PubMed 搜索关键词 -> Create RSS -> 复制 XML 链接。*
 
-进入仓库 Settings (设置)。
 
-点击左侧栏 Pages。
+4. 点击下方的 **Commit changes** 保存。
+5. **等喝口水的时间（约 1-2 分钟）**，页面就会自动刷新。
 
-在 Build and deployment 下：
+---
 
-Source: 选择 Deploy from a branch
+## 🛠️ 部署指南 (Deployment)
 
-Branch: 选择 main 分支，文件夹选择 /docs (⚠️ 注意：一定要选 docs，因为网页生成在那里)。
+如果你想 Fork 本项目搭建属于自己的阅读器，请按照以下步骤操作：
 
-点击 Save。
+### 第一步：Fork 仓库
 
-3. 配置权限 (如果报错)
-如果 Actions 运行失败提示权限不足：
+点击右上角的 **Fork** 按钮，将项目复制到你的账号下。
 
-进入仓库 Settings -> Actions -> General。
+### 第二步：配置权限 (至关重要)
 
-找到 Workflow permissions。
+GitHub Actions 需要有写入仓库的权限才能更新网页：
 
-勾选 Read and write permissions。
+1. 进入仓库 **Settings** -> **Actions** -> **General**。
+2. 滚动到 **Workflow permissions** 区域。
+3. 勾选 **Read and write permissions**。
+4. 点击 **Save**。
 
-点击 Save。
+### 第三步：开启 GitHub Pages
 
-🛠️ 技术栈
-后端逻辑: Python 3.9
+让生成的 HTML 能被公网访问：
 
-RSS 解析: feedparser
+1. 进入仓库 **Settings** -> **Pages**。
+2. 在 **Build and deployment** 下：
+* **Source**: 选择 `Deploy from a branch`。
+* **Branch**: 选择 `main` 分支，文件夹选择 `/docs` (**⚠️ 注意：必须选 /docs**)。
 
-自动翻译: deep-translator (Google Translate API)
 
-文本处理: 正则表达式 (Regex) + markdown
+3. 点击 **Save**。
 
-前端界面: HTML5 + Tailwind CSS (CDN) + Alpine.js (CDN) + Marked.js
+### 第四步：设置 API 邮箱 (可选但推荐)
 
-CI/CD: GitHub Actions
+为了防止被 PubMed 限制访问，建议在 `main.py` 中填入你的真实邮箱：
+打开 `main.py`，找到第 13 行：
 
-⚠️ 免责声明
-翻译准确性：本项目使用的是机器翻译服务，翻译结果仅供参考，准确性无法与人工翻译相比。专业术语请务必对照英文原文。
+```python
+Entrez.email = "你的邮箱@example.com"
 
-API 限制：频繁触发可能会受到翻译接口的速率限制，建议合理设置 RSS 抓取数量（建议单个源不超过 20 篇）。
+```
 
-📂 目录结构说明
-Plaintext
+---
 
-.
-├── .github/workflows/
-│   └── daily_run.yml    # 自动化流程配置 (定时任务 + 触发器)
-├── docs/                # [自动生成] 存放生成的 HTML 网页
-│   ├── index.html       # 最新日报
-│   └── archive_...html  # 历史归档
-├── main.py              # 核心 Python 脚本 (爬取、解析、翻译、生成)
-├── feeds.txt            # 配置文件 (订阅链接列表)
-└── README.md            # 项目说明文档
+## 🤖 自动化原理 (Technical Details)
+
+本系统的工作流如下：
+
+1. **Trigger**: 每天定时 (Cron) 或 检测到 `feeds.txt` 变动 (Push)。
+2. **Fetch RSS**: Python 读取订阅列表，获取最新文章的 ID (PMID)。
+3. **Fetch API**: 使用 `Biopython` 向 NCBI Entrez API 批量请求 XML 数据。
+4. **Parse & Translate**:
+* 解析 XML 中的 `Label` 属性 (如 `Label="METHODS"`)。
+* 调用 `Google Translator` 进行分段翻译。
+* 组装 Markdown 格式文本。
+
+
+5. **Generate HTML**: 渲染带有 Alpine.js 交互逻辑的静态网页。
+6. **Deploy**: 自动将生成的网页推送到 `docs/` 目录，GitHub Pages 自动展示。
+
+---
+
+## ❓ 常见问题 (FAQ)
+
+#### Q: 为什么有时候自动运行会报错？
+
+**A:** 如果你手动修改了代码，而 Actions 正在运行时，可能会发生“冲突”。
+
+* **解决方法**：无需担心。我们在工作流中添加了 `git pull --rebase` 机制，机器人会自动尝试修复冲突。如果依然失败，手动在本地 `git pull` 一下即可。
+
+#### Q: 可以订阅多少个链接？
+
+**A:** 理论上无限，但建议不要过多（例如超过 50 个），以免 API 请求时间过长导致 GitHub Actions 超时（限时 6 小时）。
+
+#### Q: 为什么有些老文章没有结构化摘要？
+
+**A:** 结构化摘要（Background/Results 等）依赖于 PubMed 数据库的收录质量。部分年代久远的论文或非标准格式的论文可能没有这些标签，系统会自动回退到全文翻译模式。
+
+---
+
+## ⚠️ 免责声明
+
+* 本项目仅供科研学术交流使用。
+* 中文翻译由机器生成，准确性仅供参考，临床决策请务必以英文原文为准。
+* 请遵守 NCBI/PubMed 的 [使用条款](https://www.ncbi.nlm.nih.gov/home/about/policies/)，不要进行恶意的超高频请求。
+
+---
+
+*Made with ❤️ by [你的名字]*
