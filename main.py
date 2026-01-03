@@ -9,11 +9,15 @@ import json
 import re
 
 # ================= 配置区 =================
-# 必须设置一个邮箱，这是 PubMed API 的要求（用于追踪滥用）
-# 你可以随便填一个，或者填真实的
-Entrez.email = "2368112905@qq.com" 
+# 1. 设置 PubMed API 邮箱 (用于防封)
+Entrez.email = "fclyn@office.bo.edu.kg"
+
+# 2. 设置自定义域名 (用于生成 CNAME 文件)
+CUSTOM_DOMAIN = "fclynmedical.de5.net" 
+# =========================================
 
 def get_rss_urls():
+    """读取 feeds.txt 文件中的链接"""
     urls = []
     if os.path.exists("feeds.txt"):
         with open("feeds.txt", "r", encoding="utf-8") as f:
@@ -22,7 +26,6 @@ def get_rss_urls():
                 if line and not line.startswith("#"):
                     urls.append(line)
     return urls
-# =========================================
 
 def get_pmid_from_link(link):
     """从链接中提取 PMID (例如 https://pubmed.ncbi.nlm.nih.gov/38169999/ -> 38169999)"""
@@ -60,16 +63,13 @@ def fetch_details_from_api(pmid_list):
                 abstract_parts = []
                 if 'Abstract' in article_data and 'AbstractText' in article_data['Abstract']:
                     # AbstractText 是一个列表，每一项可能包含 Label 属性
-                    # 例如: <AbstractText Label="BACKGROUND">...</AbstractText>
                     for item in article_data['Abstract']['AbstractText']:
                         text_content = str(item)
-                        # 获取 Label (例如 BACKGROUND, METHODS)
                         label = item.attributes.get('Label', None)
                         
                         if label:
                             abstract_parts.append({"label": label, "text": text_content})
                         else:
-                            # 如果没有 Label，就当做普通段落
                             abstract_parts.append({"label": None, "text": text_content})
                 
                 # 2. 提取关键词
@@ -99,7 +99,8 @@ def process_and_translate(pmid, api_data, fallback_abstract, translator):
     LABEL_MAPPING = {
         "BACKGROUND": "背景", "OBJECTIVE": "目的", "METHODS": "方法",
         "RESULTS": "结果", "CONCLUSION": "结论", "CONCLUSIONS": "结论",
-        "DISCUSSION": "讨论", "SIGNIFICANCE": "意义", "INTRODUCTION": "介绍"
+        "DISCUSSION": "讨论", "SIGNIFICANCE": "意义", "INTRODUCTION": "介绍",
+        "BACKGROUND AND PURPOSE": "背景与目的", "MATERIALS AND METHODS": "材料与方法"
     }
 
     structured_zh = []
@@ -132,7 +133,7 @@ def process_and_translate(pmid, api_data, fallback_abstract, translator):
                 structured_zh.append(text_en)
                 
     else:
-        # 如果 API 没数据 (比如文章太老或者 API 失败)，回退到 RSS 的 description
+        # 如果 API 没数据 (回退到 RSS description)
         clean_desc = re.sub(r'<.*?>', '', fallback_abstract).strip()
         structured_en.append(clean_desc)
         try:
@@ -147,7 +148,6 @@ def process_and_translate(pmid, api_data, fallback_abstract, translator):
         kws = api_data['keywords']
         kw_en_str = ", ".join(kws)
         try:
-            # 批量翻译关键词
             kw_zh_str = translator.translate(kw_en_str[:1000])
         except:
             kw_zh_str = kw_en_str
@@ -162,7 +162,7 @@ def fetch_and_generate():
 
     RSS_URLS = get_rss_urls()
     if not RSS_URLS:
-        print("未找到 feeds.txt")
+        print("未找到 feeds.txt 或 内容为空")
         return
 
     translator = GoogleTranslator(source='auto', target='zh-CN')
@@ -180,7 +180,7 @@ def fetch_and_generate():
             pmid_list = []
             temp_entries = []
 
-            # 1. 第一遍循环：收集所有 PMID
+            # 1. 收集 PMID
             for entry in feed.entries:
                 pmid = get_pmid_from_link(entry.link)
                 if pmid:
@@ -190,25 +190,23 @@ def fetch_and_generate():
                     "pmid": pmid
                 })
             
-            # 2. 批量从 API 获取详细数据 (这是关键步骤！)
+            # 2. 批量 API 获取
             print(f"--> [{feed_title}] 正在从 PubMed API 下载 {len(pmid_list)} 篇详细结构...")
             api_details = fetch_details_from_api(pmid_list)
             
-            # 3. 第二遍循环：结合 API 数据生成内容
+            # 3. 生成内容
             for item in temp_entries:
                 entry = item['entry']
                 pmid = item['pmid']
                 
-                # 标题翻译
                 try:
                     title_zh = translator.translate(entry.title)
                 except:
                     title_zh = entry.title
                 
-                # 获取该 PMID 对应的 API 数据
                 detail = api_details.get(pmid)
                 
-                # 处理摘要 (API 优先)
+                # 处理摘要
                 abs_zh, abs_en, kw_zh, kw_en = process_and_translate(
                     pmid, detail, entry.get('description', ''), translator
                 )
@@ -231,7 +229,7 @@ def fetch_and_generate():
         except Exception as e:
             print(f"处理 {url} 失败: {e}")
 
-    # ================= HTML 生成 (保持之前的样式) =================
+    # ================= HTML 生成 =================
     json_data = json.dumps(all_feeds_data, ensure_ascii=False)
     tz = pytz.timezone('Asia/Shanghai')
     update_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
@@ -350,10 +348,20 @@ def fetch_and_generate():
     </html>
     """
     
+    # 写入 HTML 文件
     with open(os.path.join(output_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(html_content)
     with open(os.path.join(output_dir, f"archive_{datetime.now(tz).strftime('%Y%m%d')}.html"), "w", encoding="utf-8") as f:
         f.write(html_content)
+
+    # ================= 关键：生成 CNAME 文件 =================
+    if CUSTOM_DOMAIN:
+        cname_path = os.path.join(output_dir, "CNAME")
+        with open(cname_path, "w", encoding="utf-8") as f:
+            f.write(CUSTOM_DOMAIN)
+        print(f"CNAME 文件已生成: {CUSTOM_DOMAIN}")
+    # =======================================================
+    
     print("HTML 生成完毕！")
 
 if __name__ == "__main__":
