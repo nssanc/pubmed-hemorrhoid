@@ -1,5 +1,6 @@
 import feedparser
 from deep_translator import GoogleTranslator
+from Bio import Entrez
 import time
 from datetime import datetime
 import os
@@ -8,6 +9,10 @@ import json
 import re
 
 # ================= 配置区 =================
+# 必须设置一个邮箱，这是 PubMed API 的要求（用于追踪滥用）
+# 你可以随便填一个，或者填真实的
+Entrez.email = "2368112905@qq.com" 
+
 def get_rss_urls():
     urls = []
     if os.path.exists("feeds.txt"):
@@ -19,134 +24,135 @@ def get_rss_urls():
     return urls
 # =========================================
 
-# 定义标准标题映射（英 -> 中）
-# 只要遇到左边的词，就强制转换成右边的中文加粗格式
-HEADER_MAPPING = {
-    "BACKGROUND": "背景",
-    "BACKGROUND AND PURPOSE": "背景与目的",
-    "OBJECTIVE": "目的",
-    "PURPOSE": "目的",
-    "METHODS": "方法",
-    "MATERIALS AND METHODS": "材料与方法",
-    "METHODOLOGY": "方法论",
-    "RESULTS": "结果",
-    "FINDINGS": "发现",
-    "CONCLUSION": "结论",
-    "CONCLUSIONS": "结论",
-    "DISCUSSION": "讨论",
-    "SIGNIFICANCE": "意义",
-    "INTRODUCTION": "介绍"
-}
+def get_pmid_from_link(link):
+    """从链接中提取 PMID (例如 https://pubmed.ncbi.nlm.nih.gov/38169999/ -> 38169999)"""
+    match = re.search(r'pubmed.ncbi.nlm.nih.gov/(\d+)', link)
+    if match:
+        return match.group(1)
+    return None
 
-def clean_html_tags(text):
-    """彻底清除 HTML 标签"""
-    if not text: return ""
-    text = re.sub(r'<br\s*/?>', '\n', text)
-    text = re.sub(r'</p>', '\n', text)
-    text = re.sub(r'<.*?>', '', text) # 去除所有剩余标签
-    return text.strip()
-
-def parse_and_translate_structured(raw_text, translator):
+def fetch_details_from_api(pmid_list):
     """
-    核心逻辑：
-    1. 识别文章结构
-    2. 分段拆解
-    3. 逐段翻译
-    4. 重新组装
+    使用 Biopython 调用 PubMed API 批量获取详细摘要结构
     """
-    if not raw_text:
-        return "暂无摘要", "No abstract available"
-
-    # 1. 预处理：清洗 HTML，提取关键词
-    clean_text = clean_html_tags(raw_text)
+    if not pmid_list:
+        return {}
     
-    # 提取并移除 Keywords (通常在最后)
-    keywords_en = ""
-    kw_match = re.search(r'(?:Keywords?|Key words?)\s*[:](.*)', clean_text, re.IGNORECASE | re.DOTALL)
-    if kw_match:
-        keywords_en = kw_match.group(1).strip()
-        clean_text = clean_text[:kw_match.start()].strip()
-
-    # 2. 智能分段 (Magic Step)
-    # 构建正则：寻找 "单词+冒号" 或 "单词+点" 的结构，且该单词在我们的标题库里
-    # 例如匹配: "Background:" 或 "RESULTS."
-    headers_pattern = "|".join([re.escape(k) for k in HEADER_MAPPING.keys()])
-    # 正则逻辑：(行首 或 空格后) (标题词) (冒号 或 点)
-    pattern = re.compile(r'(^|\n|\.\s+)\s*(' + headers_pattern + r')\s*[:\.]', re.IGNORECASE)
+    print(f"正在调用 API 获取 {len(pmid_list)} 篇文章的详细摘要...")
+    results_map = {}
     
-    # 使用 split 保留分隔符，这样我们能知道哪一段是哪个标题
-    parts = pattern.split(clean_text)
-    
-    # parts[0] 是第一段之前的文字（通常是无标题的 Introduction）
-    structured_content_zh = []
-    structured_content_en = []
-    
-    # 处理第一段（如果有）
-    if parts[0].strip():
-        chunk = parts[0].strip()
-        structured_content_en.append(chunk)
-        try:
-            # 第一段通常不长，直接翻
-            trans = translator.translate(chunk[:3000])
-            structured_content_zh.append(trans)
-        except:
-            structured_content_zh.append(chunk)
-
-    # 处理后续的 "标题 + 内容" 对
-    # split 后，parts 里的结构是：[前文, 分隔符, 标题, 内容, 分隔符, 标题, 内容...]
-    # 我们从索引 1 开始遍历
-    i = 1
-    while i < len(parts) - 1:
-        # parts[i] 是分隔符(换行等)，忽略
-        header_raw = parts[i+1].upper() # 标题 (如 MATERIALS AND METHODS)
-        content_raw = parts[i+2].strip() # 内容
+    try:
+        # efetch 用于获取详细记录
+        handle = Entrez.efetch(db="pubmed", id=pmid_list, rettype="xml", retmode="xml")
+        records = Entrez.read(handle)
+        handle.close()
         
-        # 找到对应的中文标题
-        header_zh = HEADER_MAPPING.get(header_raw, header_raw.capitalize())
+        # PubmedArticle 是一个列表
+        articles = records.get('PubmedArticle', [])
         
-        # === 英文版组装 ===
-        # 格式： **Materials and methods:** ...
-        en_section = f"**{header_raw.title()}:** {content_raw}"
-        structured_content_en.append(en_section)
+        for article in articles:
+            try:
+                medline = article['MedlineCitation']
+                pmid = str(medline['PMID'])
+                article_data = medline['Article']
+                
+                # 1. 提取摘要
+                abstract_parts = []
+                if 'Abstract' in article_data and 'AbstractText' in article_data['Abstract']:
+                    # AbstractText 是一个列表，每一项可能包含 Label 属性
+                    # 例如: <AbstractText Label="BACKGROUND">...</AbstractText>
+                    for item in article_data['Abstract']['AbstractText']:
+                        text_content = str(item)
+                        # 获取 Label (例如 BACKGROUND, METHODS)
+                        label = item.attributes.get('Label', None)
+                        
+                        if label:
+                            abstract_parts.append({"label": label, "text": text_content})
+                        else:
+                            # 如果没有 Label，就当做普通段落
+                            abstract_parts.append({"label": None, "text": text_content})
+                
+                # 2. 提取关键词
+                keywords = []
+                if 'KeywordList' in medline and len(medline['KeywordList']) > 0:
+                    for kw in medline['KeywordList'][0]:
+                        keywords.append(str(kw))
+
+                results_map[pmid] = {
+                    "abstract_parts": abstract_parts,
+                    "keywords": keywords
+                }
+                
+            except Exception as e:
+                print(f"解析 PMID {pmid} 出错: {e}")
+                
+    except Exception as e:
+        print(f"API 请求失败: {e}")
         
-        # === 中文版翻译与组装 ===
-        try:
-            # 只翻译内容部分！标题我们直接用映射表，准确率 100%
-            if content_raw:
-                trans_content = translator.translate(content_raw[:4000]) # 防止超长
-                zh_section = f"**{header_zh}：** {trans_content}"
-                structured_content_zh.append(zh_section)
-                time.sleep(0.3) # 稍微暂停防封
-        except Exception as e:
-            zh_section = f"**{header_zh}：** (翻译失败) {content_raw}"
-            structured_content_zh.append(zh_section)
-            print(f"分段翻译出错: {e}")
+    return results_map
 
-        i += 3 # 跳过一组 (分隔符, 标题, 内容)
+def process_and_translate(pmid, api_data, fallback_abstract, translator):
+    """
+    结合 API 数据进行翻译和组装
+    """
+    # 标题映射表
+    LABEL_MAPPING = {
+        "BACKGROUND": "背景", "OBJECTIVE": "目的", "METHODS": "方法",
+        "RESULTS": "结果", "CONCLUSION": "结论", "CONCLUSIONS": "结论",
+        "DISCUSSION": "讨论", "SIGNIFICANCE": "意义", "INTRODUCTION": "介绍"
+    }
 
-    # 如果没找到任何标题（说明是无结构摘要），就回退到全文翻译
-    if not structured_content_zh and clean_text:
+    structured_zh = []
+    structured_en = []
+    
+    # 优先使用 API 数据
+    if api_data and api_data.get('abstract_parts'):
+        parts = api_data['abstract_parts']
+        for part in parts:
+            label_en = part['label'] # 可能是 None
+            text_en = part['text']
+            
+            # 组装英文
+            if label_en:
+                structured_en.append(f"**{label_en.title()}:** {text_en}")
+            else:
+                structured_en.append(text_en)
+            
+            # 组装并翻译中文
+            try:
+                trans_text = translator.translate(text_en[:3000])
+                if label_en:
+                    # 尝试匹配中文标题
+                    label_zh = LABEL_MAPPING.get(label_en.upper(), label_en.capitalize())
+                    structured_zh.append(f"**{label_zh}：** {trans_text}")
+                else:
+                    structured_zh.append(trans_text)
+                time.sleep(0.2)
+            except:
+                structured_zh.append(text_en)
+                
+    else:
+        # 如果 API 没数据 (比如文章太老或者 API 失败)，回退到 RSS 的 description
+        clean_desc = re.sub(r'<.*?>', '', fallback_abstract).strip()
+        structured_en.append(clean_desc)
         try:
-            full_trans = translator.translate(clean_text[:4500])
-            structured_content_zh.append(full_trans)
-            structured_content_en.append(clean_text)
+            structured_zh.append(translator.translate(clean_desc[:4000]))
         except:
-            structured_content_zh.append("翻译服务不可用")
-            structured_content_en.append(clean_text)
+            structured_zh.append("翻译失败")
 
-    # 3. 翻译关键词
-    keywords_zh = ""
-    if keywords_en:
+    # 处理关键词
+    kw_en_str = ""
+    kw_zh_str = ""
+    if api_data and api_data.get('keywords'):
+        kws = api_data['keywords']
+        kw_en_str = ", ".join(kws)
         try:
-            keywords_zh = translator.translate(keywords_en)
+            # 批量翻译关键词
+            kw_zh_str = translator.translate(kw_en_str[:1000])
         except:
-            keywords_zh = keywords_en
+            kw_zh_str = kw_en_str
 
-    # 用换行符连接所有段落
-    final_zh = "\n\n".join(structured_content_zh)
-    final_en = "\n\n".join(structured_content_en)
-
-    return final_zh, final_en, keywords_zh, keywords_en
+    return "\n\n".join(structured_zh), "\n\n".join(structured_en), kw_zh_str, kw_en_str
 
 
 def fetch_and_generate():
@@ -156,58 +162,76 @@ def fetch_and_generate():
 
     RSS_URLS = get_rss_urls()
     if not RSS_URLS:
-        print("未找到 feeds.txt 或 内容为空")
+        print("未找到 feeds.txt")
         return
 
     translator = GoogleTranslator(source='auto', target='zh-CN')
     all_feeds_data = {}
     
-    print(f"准备抓取 {len(RSS_URLS)} 个订阅源...")
+    print(f"准备处理 {len(RSS_URLS)} 个订阅源...")
 
     for url in RSS_URLS:
         try:
-            print(f"正在连接: {url[:40]}...")
+            print(f"正在读取 RSS: {url[:40]}...")
             feed = feedparser.parse(url)
-            feed_title = feed.feed.get('title', '未命名订阅源').replace("PubMed ", "")
+            feed_title = feed.feed.get('title', '未命名').replace("PubMed ", "")
+            
             entries_data = []
-            
-            print(f"--> [{feed_title}] 发现 {len(feed.entries)} 篇...")
-            
-            for i, entry in enumerate(feed.entries):
-                # 1. 标题
-                title_en = entry.title
-                try:
-                    title_zh = translator.translate(title_en)
-                except:
-                    title_zh = title_en
+            pmid_list = []
+            temp_entries = []
 
-                # 2. 核心：调用新的结构化解析函数
-                raw_desc = entry.get('description', '')
+            # 1. 第一遍循环：收集所有 PMID
+            for entry in feed.entries:
+                pmid = get_pmid_from_link(entry.link)
+                if pmid:
+                    pmid_list.append(pmid)
+                temp_entries.append({
+                    "entry": entry,
+                    "pmid": pmid
+                })
+            
+            # 2. 批量从 API 获取详细数据 (这是关键步骤！)
+            print(f"--> [{feed_title}] 正在从 PubMed API 下载 {len(pmid_list)} 篇详细结构...")
+            api_details = fetch_details_from_api(pmid_list)
+            
+            # 3. 第二遍循环：结合 API 数据生成内容
+            for item in temp_entries:
+                entry = item['entry']
+                pmid = item['pmid']
                 
-                # 这里返回的已经是带 Markdown (**加粗**) 的文本了
-                abstract_zh, abstract_en, kw_zh, kw_en = parse_and_translate_structured(raw_desc, translator)
+                # 标题翻译
+                try:
+                    title_zh = translator.translate(entry.title)
+                except:
+                    title_zh = entry.title
                 
-                # 3. 作者
-                authors = entry.get('author', 'No authors listed')
+                # 获取该 PMID 对应的 API 数据
+                detail = api_details.get(pmid)
+                
+                # 处理摘要 (API 优先)
+                abs_zh, abs_en, kw_zh, kw_en = process_and_translate(
+                    pmid, detail, entry.get('description', ''), translator
+                )
 
                 entries_data.append({
-                    "id": i,
-                    "title_en": title_en,
+                    "id": pmid if pmid else entry.link,
+                    "title_en": entry.title,
                     "title_zh": title_zh,
-                    "authors": authors,
-                    "abstract_en": abstract_en,
-                    "abstract_zh": abstract_zh,
+                    "authors": entry.get('author', 'No authors'),
+                    "abstract_en": abs_en,
+                    "abstract_zh": abs_zh,
                     "keywords_zh": kw_zh,
                     "keywords_en": kw_en,
                     "link": entry.link,
                     "date": entry.get('published', '')[:16]
                 })
-        
+                
             all_feeds_data[feed_title] = entries_data
+            
         except Exception as e:
-            print(f"抓取 {url} 失败: {e}")
+            print(f"处理 {url} 失败: {e}")
 
-    # ================= HTML 生成部分 (优化了 CSS) =================
+    # ================= HTML 生成 (保持之前的样式) =================
     json_data = json.dumps(all_feeds_data, ensure_ascii=False)
     tz = pytz.timezone('Asia/Shanghai')
     update_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
@@ -227,20 +251,12 @@ def fetch_and_generate():
             .scrollbar-hide::-webkit-scrollbar {{ display: none; }}
             ::-webkit-scrollbar {{ width: 6px; }}
             ::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 3px; }}
-            
-            /* 重点：优化 Markdown 渲染样式，模拟 PubMed 格式 */
             .prose strong {{ 
-                color: #1e3a8a; /* 深蓝色 */
-                font-weight: 800; 
-                display: block; /* 让标题独占一行，类似图2 */
-                margin-top: 1.2em; 
-                margin-bottom: 0.4em;
-                text-transform: uppercase;
-                font-size: 0.85rem;
-                letter-spacing: 0.05em;
+                color: #1e3a8a; font-weight: 800; display: block; 
+                margin-top: 1.2em; margin-bottom: 0.4em;
+                text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em;
             }}
             .prose p {{ margin-bottom: 0.8em; text-align: justify; line-height: 1.7; }}
-            /* 第一段如果是引言，去掉上边距 */
             .prose p:first-of-type strong {{ margin-top: 0; }}
         </style>
     </head>
@@ -303,7 +319,6 @@ def fetch_and_generate():
                                 <div class="prose prose-sm prose-slate max-w-none text-gray-800" 
                                      x-html="marked.parse(currentPaper.abstract_zh)"></div>
                             </div>
-
                             <div>
                                 <div class="flex items-center mb-4">
                                     <span class="w-1 h-6 bg-gray-300 mr-3 rounded-full"></span>
@@ -315,35 +330,19 @@ def fetch_and_generate():
                         </div>
                     </div>
                 </template>
-                
                 <template x-if="!currentPaper">
                     <div class="flex flex-col items-center justify-center h-full text-gray-400">
-                        <svg class="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"></path></svg>
                         <p>请选择左侧文章开始阅读</p>
                     </div>
                 </template>
             </main>
         </div>
-
         <script>
             function app() {{
                 return {{
-                    feeds: {json_data},
-                    currentFeed: '',
-                    currentPapers: [],
-                    currentPaper: null,
-                    init() {{
-                        const ks = Object.keys(this.feeds);
-                        if(ks.length > 0) {{ 
-                            this.currentFeed = ks[0]; 
-                            this.selectFeed(); 
-                        }}
-                    }},
-                    selectFeed() {{
-                        this.currentPapers = this.feeds[this.currentFeed];
-                        this.currentPaper = this.currentPapers.length > 0 ? this.currentPapers[0] : null;
-                        document.querySelector('aside').scrollTop = 0;
-                    }}
+                    feeds: {json_data}, currentFeed: '', currentPapers: [], currentPaper: null,
+                    init() {{ const ks = Object.keys(this.feeds); if(ks.length > 0) {{ this.currentFeed = ks[0]; this.selectFeed(); }} }},
+                    selectFeed() {{ this.currentPapers = this.feeds[this.currentFeed]; this.currentPaper = this.currentPapers.length > 0 ? this.currentPapers[0] : null; document.querySelector('aside').scrollTop = 0; }}
                 }}
             }}
         </script>
